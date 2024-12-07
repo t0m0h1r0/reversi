@@ -1,0 +1,166 @@
+(mod (
+    ; 入力パラメータ
+    BOARD_STATE  ; 現在の盤面状態（8x8のグリッド）
+    PLAYER       ; 現在のプレイヤー（1: 黒, 2: 白）
+    MOVE         ; プレイヤーの手（行、列）
+    PLAYER_KEYS  ; プレイヤーの公開鍵
+    STAKE        ; 賭け金
+    )
+
+    ; ゲームの状態を検証する関数
+    (defun validate-move (board player move)
+        ; 盤面の状態を検証
+        ; 手が有効かどうかをチェック
+        ; 石を反転できるかどうかを判定
+        (if (is-valid-move board player move)
+            (flip-stones board player move)
+            (x)  ; 無効な手の場合は例外
+        )
+    )
+
+    ; 有効な手かどうかをチェックする関数
+    (defun is-valid-move (board player move)
+        ; 移動先が空いているか
+        ; 相手の石を挟めるかどうかをチェック
+        ; 上下左右、斜めの方向を検証
+        (and 
+            (= (get-cell board (first move) (rest move)) 0)  ; セルが空
+            (or 
+                (can-flip-direction board player move (1 0))   ; 右
+                (can-flip-direction board player move (-1 0))  ; 左
+                (can-flip-direction board player move (0 1))   ; 下
+                (can-flip-direction board player move (0 -1))  ; 上
+                ; 斜めの方向も追加
+                (can-flip-direction board player move (1 1))   ; 右下
+                (can-flip-direction board player move (-1 -1)) ; 左上
+                (can-flip-direction board player move (1 -1))  ; 右上
+                (can-flip-direction board player move (-1 1))  ; 左下
+            )
+        )
+    )
+
+    ; 特定の方向で石を反転できるかチェック
+    (defun can-flip-direction (board player move direction)
+        ; 指定された方向に相手の石を挟めるかどうかを検証
+        ; 方向ベクトルに沿って移動しながらチェック
+        (let 
+            (
+                (opponent (if (= player 1) 2 1))
+                (x (+ (first move) (first direction)))
+                (y (+ (rest move) (rest direction)))
+            )
+            (if 
+                (and 
+                    (>= x 0) (< x 8)  ; ボード範囲内
+                    (>= y 0) (< y 8)
+                    (= (get-cell board x y) opponent)  ; 最初のセルが相手の石
+                )
+                ; 相手の石を挟めるかさらに検証
+                (check-flip-stones board player x y direction)
+                false
+            )
+        )
+    )
+
+    ; 石を反転できるかを最終チェック
+    (defun check-flip-stones (board player x y direction)
+        (let 
+            (
+                (opponent (if (= player 1) 2 1))
+                (new-x (+ x (first direction)))
+                (new-y (+ y (rest direction)))
+            )
+            (if 
+                (and 
+                    (>= new-x 0) (< new-x 8)
+                    (>= new-y 0) (< new-y 8)
+                )
+                (let ((cell (get-cell board new-x new-y)))
+                    (cond 
+                        ((= cell opponent) 
+                            (check-flip-stones board player new-x new-y direction)
+                        )
+                        ((= cell player) true)  ; 自分の石があれば反転可能
+                        (true false)  ; それ以外は反転不可
+                    )
+                )
+                false
+            )
+        )
+    )
+
+    ; 盤面から特定のセルの値を取得
+    (defun get-cell (board x y)
+        (let ((row (nth board x)))
+            (nth row y)
+        )
+    )
+
+    ; ゲーム終了判定
+    (defun check-game-end (board)
+        (let 
+            (
+                (black-count (count-stones board 1))
+                (white-count (count-stones board 2))
+            )
+            (cond
+                ((> black-count white-count) 1)  ; 黒の勝利
+                ((> white-count black-count) 2)  ; 白の勝利
+                (true 0)  ; 引き分け
+            )
+        )
+    )
+
+    ; 石の数をカウント
+    (defun count-stones (board player)
+        (reduce 
+            +
+            (map 
+                (lambda (row) 
+                    (count (lambda (cell) (= cell player)) row)
+                )
+                board
+            )
+        )
+    )
+
+    ; 報酬分配
+    (defun distribute-reward (player-keys winner stake)
+        (if (= winner 0)  ; 引き分けの場合は元の賭け金を返却
+            (list 
+                (list (first player-keys) stake)
+                (list (rest player-keys) stake)
+            )
+            ; 勝者に全ての賭け金を分配
+            (list 
+                (list 
+                    (if (= winner 1) (first player-keys) (rest player-keys)) 
+                    (* stake 2)
+                )
+            )
+        )
+    )
+
+    ; メインの検証関数
+    (defun validate-game-state (
+        board 
+        player 
+        move 
+        player-keys 
+        stake
+    )
+        (let 
+            (
+                (new-board (validate-move board player move))
+                (game-result (check-game-end new-board))
+            )
+            (if (not (= game-result 0))
+                (distribute-reward player-keys game-result stake)
+                new-board  ; ゲーム継続
+            )
+        )
+    )
+
+    ; コントラクトのメインロジック
+    (validate-game-state BOARD_STATE PLAYER MOVE PLAYER_KEYS STAKE)
+)
